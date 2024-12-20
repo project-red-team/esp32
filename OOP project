@@ -1,0 +1,376 @@
+from abc import ABC, abstractmethod
+
+# ESP32 Class
+class ESP32: # Server Class
+    def __init__(self):
+        self._DHT11_sensor_pin = 0
+        self._soil_sensor_pin = 1
+        self._relay_pin = 2
+        self._pump_pin = 3
+        self._ac_pin = 4
+        self._voltage_regulator_pin = 5
+        self._buzzer_pin = 6
+        self._button_pin = 7  
+        self._gnd1 = 8
+        self._gnd2 = 9
+        self._gnd3 = 10
+        self._gnd4 = 11
+        self._gnd5 = 12
+
+class HardwareModule(ABC): # Abstract Base Class for Hardware Modules
+    def __init__(self, esp32, pin, pin2=None):
+        self.esp32 = esp32 # assigning the appropriate esp32 module
+        self._data_pin = pin    # assigning the data pin to the hardware
+        self._gnd_pin2 = pin2  # assigning ground pin
+
+    @abstractmethod
+    def initialize(self):
+        """Abstract method to initialize the hardware module"""
+        pass
+
+    @abstractmethod
+    def operate(self, *args):
+        """Abstract method to operate the hardware module"""
+        pass
+
+class PassiveComponent(ABC):# Passive Component Class
+    """Abstract class for resistors and capacitors."""
+    def __init__(self, value, unit, tolerance=None):
+        self.value = value
+        self.unit = unit
+        self.tolerance = tolerance  # Optional (in %)
+
+    @abstractmethod
+    def describe(self):
+        """Describe the passive component and where to plug it."""
+        pass
+
+class Resistor(PassiveComponent):
+    """Represents a resistor in the circuit."""
+    def __init__(self, value, tolerance):
+        super().__init__(value, "Ω", tolerance)
+
+    def describe(self):
+        return f"Resistor: {self.value}{self.unit}, Tolerance: ±{self.tolerance}%"
+
+class Capacitor(PassiveComponent):
+    """Represents a capacitor in the circuit."""
+    def __init__(self, value, unit, tolerance=None):
+        super().__init__(value, unit, tolerance)
+
+    def describe(self):
+        tolerance_info = f", Tolerance: ±{self.tolerance}%" if self.tolerance else ""
+        return f"Capacitor: {self.value}{self.unit}{tolerance_info}"
+
+class VoltageRegulator(HardwareModule):# Voltage Regulator Class
+
+    """Represents the 7805 Voltage Regulator."""
+    output_voltage = 5  # 7805 always outputs 5V
+    volcheck=True
+    def __init__(self, esp32,buzzer, PowerSupply12V,relay):
+        super().__init__(esp32, esp32._voltage_regulator_pin, esp32._gnd1)
+        self.relay=relay
+        self.PowerSupply12V = PowerSupply12V
+        self.input_voltage = self.PowerSupply12V.input_voltage
+        self.esp32 = esp32
+        self.buzzer = buzzer
+
+    def initialize(self):
+        print(f"Initializing 7805 Voltage Regulator with input voltage {self.PowerSupply12V.input_voltage}V...")
+
+    def operate(self):
+        if  self.PowerSupply12V.input_voltage < self.output_voltage :
+            print("no enough current! Activating buzzer...")
+            self.buzzer.beep_pattern("pump_error")
+            return False
+        elif self.PowerSupply12V.input_voltage < 20 :
+            print("No current issues detected.")
+            self.buzzer.operate("OFF")
+            self.PowerSupply12V.input_voltage=self.output_voltage 
+            return True
+        else:
+            print("too high voltage! Activating buzzer...")
+            self.buzzer.beep_pattern("pump_error")
+            return False
+
+            
+    
+    # Class for 12V Power Supply
+
+
+class PowerSupply12V(HardwareModule):# current supply Class
+    def __init__(self, esp32, buzzer, relay,input_voltage):
+        super().__init__(esp32, esp32._ac_pin, esp32._gnd1)
+        self.esp32 = esp32
+        self.buzzer = buzzer
+        self.input_voltage=input_voltage
+        self.relay=relay
+
+    def initialize(self):
+        print(f"Initializing 12V Power Supply on pin {self._data_pin}...")
+
+    def operate(self,action):
+        print(f"Power Supply providing {self.input_voltage}V")
+        if action.upper() == "ON":
+            print("current is flowing")
+            self.relay.operate("ON")
+            print("Done successfully")
+        elif action.upper() == "OFF":
+            print("Stopping current flow")
+            self.relay.operate("OFF")
+            print("Done successfully")
+       
+class DHT11_sensor(HardwareModule):# DHT11 Sensor Class
+    def __init__(self, esp32):
+        super().__init__(esp32, esp32._DHT11_sensor_pin, esp32._gnd5)
+
+    def initialize(self):
+        print(f"Initializing DHT11 humidity sensor on pin {self._pin}...") 
+
+    def operate(self):
+        print("Reading Humidity value...")
+        humidity = 9  # Replace with actual sensor reading logic
+        print(f"Humidity: {humidity}%")
+        return humidity
+
+class SoilSensor(HardwareModule): # Soil Sensor Class
+
+    def __init__(self, esp32):
+        super().__init__(esp32, esp32._soil_sensor_pin, esp32._gnd2)
+
+    def initialize(self):
+        print(f"Initializing Soil Sensor on pin {self._data_pin}...")
+
+    def operate(self):
+        print("Reading soil moisture value...")
+        moisture = 8  # Replace with actual sensor reading logic
+        print(f"Soil moisture: {moisture}%")
+        return moisture
+
+class Relay(HardwareModule):# Relay Class
+    def __init__(self, esp32):
+        super().__init__(esp32, esp32._relay_pin, esp32._gnd3)
+        self.state = False  # Initial state is OFF
+
+    def initialize(self):
+        print(f"Initializing Relay on pin {self._pin}...")
+
+    def operate(self, action):
+        if action.upper() == "ON":
+            if not self.state:
+                print("Turning ON the relay...")
+                self.state = True
+                print("relay is ON ")
+            else:
+                print("Relay is already ON.")
+        elif action.upper() == "OFF":
+            if self.state:
+                print("Turning OFF the relay...")
+                self.state = False
+                print("relay is OFF")
+            else:
+                print("Relay is already OFF.")
+
+class Pump(HardwareModule):# Pump Class
+    def __init__(self, esp32, relay):
+        super().__init__(esp32, esp32._pump_pin, esp32._gnd4)
+        self.relay = relay
+
+    def initialize(self):
+        print(f"Initializing Pump on pin {self._data_pin}...")
+
+    def operate(self, action):
+        if action.upper() == "ON":
+            print("Turning ON the pump...")
+            self.relay.operate("ON")
+            print("Pump is on")
+        elif action.upper() == "OFF":
+            print("Turning OFF the pump...")
+            self.relay.operate("OFF")
+            print("Pump is off")
+
+class PushButton1(Pump):  # Inherit from pump, not HardwareModule
+    def __init__(self, esp32, relay):
+        super().__init__(esp32,relay)  # inheriting pump's __init__ method and assigning the given instance attributte 
+        self._pin = esp32._button_pin  # Set the button pin separately
+        self.button_state = True # when the button is damaged it always returns TRUE 
+
+    def initialize(self):
+        print(f"Initializing Push Button on pin {self._pin}...")
+
+    def press(self):  # Simulate button press logic
+        
+        if self.button_state:
+            print("Button is pressed. Turning OFF the pump...")
+            self.operate("OFF")  # Call the inherited operate method directly from pump class
+        else:
+            print("Button is not pressed.")
+
+class Buzzer(HardwareModule):  # Buzzer Class
+    def __init__(self, esp32):
+        super().__init__(esp32, esp32._buzzer_pin)
+        self.state = False
+
+    def initialize(self):
+        print(f"Initializing Buzzer on pin {self._data_pin}...")
+
+    def operate(self, action): # turnning on and off the buzzer
+        if action.upper() == "ON":
+            if not self.state:
+                print("Please wait...")
+                self.state = True
+                print("buzzer is on")
+            else:
+                print("Buzzer is already ON.")
+        elif action.upper() == "OFF":
+            if self.state:
+                print("Please wait...")
+                self.state = False
+                print("buzzer is off")
+            else:
+                print("Buzzer is already OFF.")
+
+    def beep_pattern(self, pattern_type):
+        if pattern_type == "low_voltage":
+            print("Buzzer is beeping: Beep... Beep... Beep... (Low Voltage Alert)")
+            """replace wuth actual code for a specific beeping pattern"""
+        elif pattern_type == "pump_error":
+            print("Buzzer is beeping: Beep-Beep-Beep (Pump Functionality Alert)")
+            """replace wuth actual code for a specific beeping pattern"""
+
+# Push Button Class
+class PushButton(Buzzer):  # Inherit from Buzzer, not HardwareModule
+    def __init__(self, esp32):# Initialize PushButton as a Buzzer instance with specific button pin 
+        super().__init__(esp32)  # Calls Buzzer's __init__ method
+        self._pin = esp32._button_pin  # Set the button pin separately
+        self.button_state = True
+      
+
+    def initialize(self):
+        print(f"Initializing Push Button on pin {self._pin}...")
+
+    def press(self):
+        # Simulate button press logic
+        if self.button_state:
+            print("Button is pressed. Turning OFF the buzzer...")
+            self.operate("OFF")  # Call the inherited operate method directly
+        else:
+            print("Button is not pressed.")
+
+
+class MockESP32WiFiClient: # Remote control Class
+    def __init__(self, server):
+        self.server = server  # Reference to the server (watering system)
+
+    def send_command(self, command):
+        print(f"Mock client sending: {command}")
+        self.server.process_command(command)  # Directly invoke server's command handler
+
+
+class WateringSystem: # main system class
+    def __init__(self, soil_sensor, pump, passive_components, voltage_regulator, DHT11_sensor, buzzer, button, power_supply,power_supply_relay):
+        self.soil_sensor = soil_sensor
+        self.pump = pump
+        self.passive_components = passive_components  # List of resistors and capacitors
+        self.voltage_regulator = voltage_regulator
+        self.DHT11_sensor = DHT11_sensor
+        self.buzzer = buzzer
+        self.button = button
+        self.power_supply = power_supply
+        self.power_supply_relay = power_supply_relay
+    def initialize_system(self):
+        print("Initializing watering system...")
+        self.power_supply.initialize()
+        self.voltage_regulator.initialize()
+        self.soil_sensor.initialize()
+        self.pump.initialize()
+        self.buzzer.initialize()
+        self.button.initialize()
+        print("Checking passive components:")
+        for component in self.passive_components:
+            print(component.describe())
+
+    def process_command(self, command):
+        if command == "TURN_ON_PUMP":
+            print("Turning on the pump.")
+            self.pump.operate("ON")
+
+        elif command == "TURN_OFF_PUMP":
+            self.pump.operate("OFF")
+
+        elif command == "STOP_current": 
+            self.power_supply.operate("OFF")
+
+        elif command == "Let_current":
+            self.power_supply.operate("ON") 
+
+        else:
+            print(f"Unknown command: {command}")
+
+
+    def check_voltage(self):
+        if not self.voltage_regulator.operate():
+            print("Insufficient voltage detected! Stopping the watering system.")
+            self.buzzer.beep_pattern("low_voltage")
+            self.pump.operate("OFF")
+            return False
+        return True
+        
+
+    def check_moisture(self):
+        
+        moisture = self.soil_sensor.operate()
+        humidity = self.DHT11_sensor.operate()
+        if moisture < 10 and humidity < 16 and self.voltage_regulator.operate() :  # Threshold for turning on the pump
+            print("Low moisture and humidity detected.")
+            self.buzzer.operate("ON")
+            self.pump.operate("ON")
+        else:
+            self.buzzer.operate("OFF")
+            self.pump.operate("OFF")
+
+if __name__ == "__main__":
+
+    # Instantiate passive components
+    resistor1 = Resistor(1, 5)  # 1Ω resistor with ±5% tolerance
+    capacitor1 = Capacitor(100, "uF", 10)  # 100uF capacitor with ±10% tolerance
+    capacitor2 = Capacitor(330, "nF")  # 330nF capacitor with no tolerance specified
+    # Create the watering system
+    passive_components = [resistor1, capacitor1, capacitor2]
+
+    # Mock components
+    class MockComponent:
+        def initialize(self):
+            print("Component initialized.")
+
+        def operate(self, state=None):
+            print(f"DONE")
+
+        def describe(self):
+            return "Mock passive component."
+    esp=ESP32()
+    relay=Relay(esp)
+    power_supply_relay= Relay(esp)
+    buzzer = Buzzer(esp)
+    power_supply = PowerSupply12V(esp,buzzer,relay,input_voltage=1)
+    soil_sensor = SoilSensor(esp)
+    pump = Pump(esp,relay)
+    voltage_regulator = VoltageRegulator(esp,buzzer,power_supply,relay)
+    Dht11_sensor = DHT11_sensor(esp)
+    button = PushButton(esp)
+  
+  
+    
+    watering_system = WateringSystem( soil_sensor, pump, passive_components, voltage_regulator, Dht11_sensor, buzzer, button, power_supply,power_supply_relay)
+    
+    watering_system.initialize_system()
+
+    # Simulate client-server interaction using mock
+    mock_client = MockESP32WiFiClient(watering_system)
+    mock_client.send_command("Let_current")
+    button.press()
+    watering_system.check_voltage()
+    watering_system.check_moisture()
+
+   
+    
